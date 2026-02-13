@@ -30,6 +30,27 @@ From repository root:
 ./VibeArena_Build/play.sh
 ```
 
+## Installation
+
+### For Humans
+
+Copy and paste this prompt to your LLM agent (Claude Code, OpenCode, Codex, Cursor, etc.):
+
+```text
+Install and configure VibeArena by following the instructions here:
+https://raw.githubusercontent.com/lgcarrier/vibearena/refs/heads/main/docs/guide/installation.md
+```
+
+Or read the [Installation Guide](docs/guide/installation.md) directly, but agent-driven setup is recommended to reduce manual mistakes.
+
+### For LLM Agents
+
+Fetch the installation guide and follow it:
+
+```bash
+curl -s https://raw.githubusercontent.com/lgcarrier/vibearena/refs/heads/main/docs/guide/installation.md
+```
+
 ## What This Project Produces
 
 After a successful build, you get:
