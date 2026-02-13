@@ -14,4 +14,5 @@ Run:
 
 Mod source workflow:
 - Put your content in `mods/bounce_twice_rockets/scripts`, `maps`, `textures`, `sound`.
+- Optional custom main menu background: place `mods/bounce_twice_rockets/assets/mainmenu/background.jpg` (or `.jpeg`, `.png`, `.tga`), or pass `--mainmenu-image /path/to/image` when generating.
 - Re-run `scripts/generate_default_mod.sh bounce_twice_rockets` when you want to rebuild the default qagame VM patch.

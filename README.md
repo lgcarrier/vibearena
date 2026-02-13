@@ -154,6 +154,21 @@ Custom mod name:
 ./VibeArena_Build/run_my_vibe_mod.sh
 ```
 
+Custom main menu background (per mod):
+
+1. Put an image at `mods/<mod_name>/assets/mainmenu/background.jpg` (or `.jpeg`, `.png`, `.tga`).
+2. Re-generate the mod:
+
+```bash
+./scripts/generate_default_mod.sh <mod_name>
+```
+
+You can also pass an explicit image path:
+
+```bash
+./scripts/generate_default_mod.sh <mod_name> --mainmenu-image /absolute/path/to/background.png
+```
+
 Quick verification that your mod VM is loaded:
 
 ```bash

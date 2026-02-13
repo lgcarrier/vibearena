@@ -9,6 +9,8 @@ DEFAULT_VARIANT="default"
 MOD_NAME="$DEFAULT_MOD_NAME"
 MOD_NAME_SET=0
 MOD_VARIANT="$DEFAULT_VARIANT"
+MAINMENU_IMAGE_ARG=""
+MAINMENU_STATUS="disabled (no image provided)"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -23,13 +25,21 @@ while [ $# -gt 0 ]; do
     --debug-visible)
       MOD_VARIANT="debug-visible"
       ;;
+    --mainmenu-image)
+      shift
+      if [ $# -eq 0 ]; then
+        echo "ERROR: --mainmenu-image requires a path to an image file." >&2
+        exit 1
+      fi
+      MAINMENU_IMAGE_ARG="$1"
+      ;;
     *)
       if [ "$MOD_NAME_SET" -eq 0 ]; then
         MOD_NAME="$1"
         MOD_NAME_SET=1
       else
         echo "ERROR: unexpected argument '$1'." >&2
-        echo "Usage: ./scripts/generate_default_mod.sh [mod_name] [--variant default|debug-visible]" >&2
+        echo "Usage: ./scripts/generate_default_mod.sh [mod_name] [--variant default|debug-visible] [--mainmenu-image /path/to/image]" >&2
         exit 1
       fi
       ;;
@@ -52,6 +62,22 @@ MOD_VM_DIR="${MOD_BUILD_DIR}/vm"
 MOD_DIST_DIR="${DIST_DIR}/${MOD_NAME}"
 MOD_PK3="${MOD_DIST_DIR}/z_${MOD_NAME}.pk3"
 MOD_LAUNCHER="${DIST_DIR}/run_${MOD_NAME}.sh"
+MOD_MAINMENU_ASSETS_DIR="${MOD_DIR}/assets/mainmenu"
+
+PK3_ASSET_DIRS=(
+  "scripts"
+  "maps"
+  "textures"
+  "sound"
+  "models"
+  "music"
+  "gfx"
+  "ui"
+  "fonts"
+  "sprites"
+  "env"
+  "video"
+)
 
 TMP_ROOT="${ROOT_DIR}/.tmp/modgen-${MOD_NAME}-$$"
 TMP_ENGINE="${TMP_ROOT}/engine"
@@ -304,6 +330,7 @@ Run:
 
 Mod source workflow:
 - Put your content in \`mods/${MOD_NAME}/scripts\`, \`maps\`, \`textures\`, \`sound\`.
+- Optional custom main menu background: place \`mods/${MOD_NAME}/assets/mainmenu/background.jpg\` (or \`.jpeg\`, \`.png\`, \`.tga\`), or pass \`--mainmenu-image /path/to/image\` when generating.
 - Re-run \`scripts/generate_default_mod.sh ${MOD_NAME} --variant debug-visible\` when you want to rebuild this variant.
 EOF
   else
@@ -324,14 +351,15 @@ Run:
 
 Mod source workflow:
 - Put your content in \`mods/${MOD_NAME}/scripts\`, \`maps\`, \`textures\`, \`sound\`.
+- Optional custom main menu background: place \`mods/${MOD_NAME}/assets/mainmenu/background.jpg\` (or \`.jpeg\`, \`.png\`, \`.tga\`), or pass \`--mainmenu-image /path/to/image\` when generating.
 - Re-run \`scripts/generate_default_mod.sh ${MOD_NAME}\` when you want to rebuild the default qagame VM patch.
 EOF
   fi
 }
 
 write_mod_scaffold() {
-  mkdir -p "${MOD_DIR}/scripts" "${MOD_DIR}/maps" "${MOD_DIR}/textures" "${MOD_DIR}/sound" "${MOD_DIR}/vm"
-  touch "${MOD_DIR}/scripts/.gitkeep" "${MOD_DIR}/maps/.gitkeep" "${MOD_DIR}/textures/.gitkeep" "${MOD_DIR}/sound/.gitkeep" "${MOD_DIR}/vm/.gitkeep"
+  mkdir -p "${MOD_DIR}/scripts" "${MOD_DIR}/maps" "${MOD_DIR}/textures" "${MOD_DIR}/sound" "${MOD_DIR}/vm" "${MOD_MAINMENU_ASSETS_DIR}"
+  touch "${MOD_DIR}/scripts/.gitkeep" "${MOD_DIR}/maps/.gitkeep" "${MOD_DIR}/textures/.gitkeep" "${MOD_DIR}/sound/.gitkeep" "${MOD_DIR}/vm/.gitkeep" "${MOD_MAINMENU_ASSETS_DIR}/.gitkeep"
 }
 
 ensure_base_setup() {
@@ -378,6 +406,139 @@ build_qagame_qvm() {
   cp "$qvm_path" "${MOD_VM_DIR}/qagame.qvm"
 }
 
+resolve_mainmenu_image() {
+  local candidate
+
+  if [ -n "$MAINMENU_IMAGE_ARG" ]; then
+    if [ ! -f "$MAINMENU_IMAGE_ARG" ]; then
+      echo "ERROR: --mainmenu-image file not found: $MAINMENU_IMAGE_ARG" >&2
+      exit 1
+    fi
+    echo "$MAINMENU_IMAGE_ARG"
+    return 0
+  fi
+
+  for candidate in \
+    "${MOD_MAINMENU_ASSETS_DIR}/background.jpg" \
+    "${MOD_MAINMENU_ASSETS_DIR}/background.jpeg" \
+    "${MOD_MAINMENU_ASSETS_DIR}/background.png" \
+    "${MOD_MAINMENU_ASSETS_DIR}/background.tga"; do
+    if [ -f "$candidate" ]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+detect_oanew_shader_pk3() {
+  local pk3
+
+  for pk3 in \
+    "${DIST_DIR}/baseoa/pak6-patch088.pk3" \
+    "${DIST_DIR}/baseoa/pak6-patch085.pk3" \
+    "${DIST_DIR}/baseoa/pak0.pk3"; do
+    if [ -f "$pk3" ] && unzip -l "$pk3" "scripts/oanew.shader" >/dev/null 2>&1; then
+      echo "$pk3"
+      return 0
+    fi
+  done
+
+  for pk3 in "${DIST_DIR}/baseoa/"*.pk3; do
+    if [ -f "$pk3" ] && unzip -l "$pk3" "scripts/oanew.shader" >/dev/null 2>&1; then
+      echo "$pk3"
+      return 0
+    fi
+  done
+
+  echo "ERROR: could not locate scripts/oanew.shader in baseoa pk3 assets." >&2
+  exit 1
+}
+
+rewrite_oanew_menu_shaders() {
+  local shader_file="$1"
+  local menu_image_shader_path="$2"
+  local rewritten_file="${shader_file}.tmp"
+
+  MAINMENU_SHADER_IMAGE="$menu_image_shader_path" perl -0777 -pe '
+    my $img = $ENV{MAINMENU_SHADER_IMAGE};
+
+    sub make_menu_block {
+      my ($name, $image_path) = @_;
+      return "$name\n{\n\tnopicmip\n\t{\n\t\tclampmap $image_path\n\t\trgbGen identity\n\t}\n}\n";
+    }
+
+    s{menubacknologo_blueish\s*\{(?:[^{}]|\{[^{}]*\})*\}}{make_menu_block("menubacknologo_blueish", $img)}sge;
+    s{menuback_blueish\s*\{(?:[^{}]|\{[^{}]*\})*\}}{make_menu_block("menuback_blueish", $img)}sge;
+    s{menubacknologo\s*\{(?:[^{}]|\{[^{}]*\})*\}}{make_menu_block("menubacknologo", $img)}sge;
+    s{menuback\s*\{(?:[^{}]|\{[^{}]*\})*\}}{make_menu_block("menuback", $img)}sge;
+  ' "$shader_file" > "$rewritten_file"
+
+  mv "$rewritten_file" "$shader_file"
+
+  if ! grep -q "clampmap ${menu_image_shader_path}" "$shader_file"; then
+    echo "ERROR: failed to rewrite main menu shader blocks in ${shader_file}." >&2
+    exit 1
+  fi
+
+  cat >> "$shader_file" <<EOF
+
+menubackRagePro
+{
+  nopicmip
+  {
+    clampmap ${menu_image_shader_path}
+    rgbGen identity
+  }
+}
+EOF
+}
+
+inject_mainmenu_background() {
+  local source_image image_ext shader_image_path source_pk3
+
+  if ! source_image="$(resolve_mainmenu_image)"; then
+    return 0
+  fi
+
+  image_ext="${source_image##*.}"
+  image_ext="$(echo "$image_ext" | tr '[:upper:]' '[:lower:]')"
+  case "$image_ext" in
+    jpg|jpeg|png|tga)
+      ;;
+    *)
+      echo "ERROR: unsupported main menu image format '${image_ext}'. Use .jpg, .jpeg, .png, or .tga." >&2
+      exit 1
+      ;;
+  esac
+
+  shader_image_path="gfx/vibe/mainmenu_background.${image_ext}"
+  mkdir -p "${MOD_BUILD_DIR}/gfx/vibe" "${MOD_BUILD_DIR}/scripts"
+  cp "$source_image" "${MOD_BUILD_DIR}/${shader_image_path}"
+
+  source_pk3="$(detect_oanew_shader_pk3)"
+  unzip -p "$source_pk3" "scripts/oanew.shader" > "${MOD_BUILD_DIR}/scripts/oanew.shader"
+  rewrite_oanew_menu_shaders "${MOD_BUILD_DIR}/scripts/oanew.shader" "$shader_image_path"
+
+  MAINMENU_STATUS="enabled (${source_image})"
+}
+
+stage_mod_assets() {
+  local asset_dir
+
+  for asset_dir in "${PK3_ASSET_DIRS[@]}"; do
+    if [ -d "${MOD_DIR}/${asset_dir}" ]; then
+      cp -R "${MOD_DIR}/${asset_dir}" "${MOD_BUILD_DIR}/"
+    fi
+  done
+
+  inject_mainmenu_background
+
+  find "${MOD_BUILD_DIR}" -name '.gitkeep' -type f -delete
+  find "${MOD_BUILD_DIR}" -type d -empty -delete
+}
+
 verify_qagame_identity() {
   local qvm_path="${MOD_VM_DIR}/qagame.qvm"
 
@@ -397,7 +558,7 @@ package_mod_pk3() {
   rm -f "$MOD_PK3"
   (
     cd "$MOD_BUILD_DIR"
-    zip -q -r "$MOD_PK3" vm
+    zip -q -r "$MOD_PK3" .
   )
 }
 
@@ -441,6 +602,7 @@ main() {
   require_cmd tar
   require_cmd find
   require_cmd strings
+  require_cmd perl
 
   cd "$ROOT_DIR"
   trap cleanup EXIT
@@ -453,6 +615,7 @@ main() {
   write_mod_readme
   build_qagame_qvm "$cmake_bin"
   verify_qagame_identity
+  stage_mod_assets
   package_mod_pk3
   write_mod_launcher
 
@@ -461,6 +624,7 @@ main() {
   echo "Patch source: ${PATCH_FILE}"
   echo "Built qagame VM: ${MOD_VM_DIR}/qagame.qvm"
   echo "Packaged mod: ${MOD_PK3}"
+  echo "Main menu background: ${MAINMENU_STATUS}"
   echo "Launcher: ${MOD_LAUNCHER}"
   echo "Run: ./VibeArena_Build/run_${MOD_NAME}.sh"
 }
