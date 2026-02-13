@@ -1,0 +1,73 @@
+diff --git a/code/game/g_missile.c b/code/game/g_missile.c
+--- a/code/game/g_missile.c
++++ b/code/game/g_missile.c
+@@ -278,11 +278,27 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
+ 	// check for bounce
+ 	if ( !other->takedamage &&
+ 		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF ) ) ) {
++		/*
++		 * Vibe default mod behavior: rockets bounce twice, then explode
++		 * on the third world collision.
++		 */
++		if ( ent->s.weapon == WP_ROCKET_LAUNCHER ) {
++			G_Printf( "[vibe-mod] rocket world hit, bounces left: %d\n", ent->count );
++			if ( ent->count <= 0 ) {
++				G_ExplodeMissile( ent );
++				return;
++			}
++			ent->count--;
++		}
+ 		G_BounceMissile( ent, trace );
++		if ( ent->s.weapon == WP_ROCKET_LAUNCHER ) {
++			VectorScale( ent->s.pos.trDelta, 0.65f, ent->s.pos.trDelta );
++			SnapVector( ent->s.pos.trDelta );
++		}
+ 		G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
+ 		return;
+ 	}
+ 
+ #ifdef MISSIONPACK
+ 	if ( other->takedamage ) {
+ 		if ( ent->s.weapon != WP_PROX_LAUNCHER ) {
+@@ -663,10 +676,14 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
+ 	bolt->splashMethodOfDeath = MOD_ROCKET_SPLASH;
+ 	bolt->clipmask = MASK_SHOT;
+ 	bolt->target_ent = NULL;
++	/* enable rocket bounce and start with two bounces remaining */
++	bolt->s.eFlags |= EF_BOUNCE;
++	bolt->count = 2;
++	G_Printf( "[vibe-mod] spawned rocket with bounce budget %d\n", bolt->count );
+ 
+ 	bolt->s.pos.trType = TR_LINEAR;
+ 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+ 	VectorCopy( start, bolt->s.pos.trBase );
+-	VectorScale( dir, 900, bolt->s.pos.trDelta );
++	VectorScale( dir, 550, bolt->s.pos.trDelta );
+ 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
+ 	VectorCopy (start, bolt->r.currentOrigin);
+
+diff --git a/code/game/g_local.h b/code/game/g_local.h
+--- a/code/game/g_local.h
++++ b/code/game/g_local.h
+@@ -30,7 +30,7 @@
+ //==================================================================
+ 
+ // the "gameversion" client command will print this plus compile date
+-#define	GAMEVERSION	BASEGAME
++#define	GAMEVERSION	"baseoa"
+ 
+ #define BODY_QUEUE_SIZE		8
+ 
+diff --git a/code/game/bg_public.h b/code/game/bg_public.h
+--- a/code/game/bg_public.h
++++ b/code/game/bg_public.h
+@@ -28,7 +28,7 @@
+-#define	GAME_VERSION		BASEGAME "-1"
++#define	GAME_VERSION		"baseoa-1"
+ 
+ #define	DEFAULT_GRAVITY		800
+ #define	GIB_HEALTH			-40
+ #define	ARMOR_PROTECTION	0.66
+ 
+ #define	MAX_ITEMS			256
+ 

@@ -1,0 +1,35 @@
+# macOS
+.DS_Store
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local tooling/bootstrap
+.tools/
+
+# Cloned engine source and local builds
+quake_engine/
+
+# Downloaded/extracted OpenArena assets
+openarena-0.8.8.zip
+openarena_0.8.8/
+
+# Packaged distribution output
+VibeArena_Build/
+
+# Verification/runtime logs
+verify_*.log
+
+# Temporary build/worktree scratch space
+.tmp/
+
+# Generated mod binaries
+mods/*/build/
+mods/*/*.pk3
+
+# Patch / merge leftovers
+*.orig
+*.rej

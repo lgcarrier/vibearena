@@ -1,0 +1,85 @@
+diff --git a/code/game/g_missile.c b/code/game/g_missile.c
+--- a/code/game/g_missile.c
++++ b/code/game/g_missile.c
+@@ -279,7 +279,36 @@ void G_MissileImpact( gentity_t *ent, trace_t *trace ) {
+-	// check for bounce
++	/* debug-visible rockets bounce on any impact for clear visual feedback */
++	if ( ent->s.weapon == WP_ROCKET_LAUNCHER &&
++		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF ) ) ) {
++		G_Printf( "[vibe-mod-debug] rocket impact, bounces left: %d\n", ent->count );
++		if ( ent->count <= 0 ) {
++			G_ExplodeMissile( ent );
++			return;
++		}
++		ent->count--;
++		trap_SendServerCommand( -1, va(
++			"print \"^3[VIBE DEBUG]^7 rocket bounce, %d left\n\"",
++			ent->count ) );
++		trap_SendServerCommand( -1, va(
++			"cp \"^3[VIBE DEBUG]^7 rocket bounce, %d left\"",
++			ent->count ) );
++		G_BounceMissile( ent, trace );
++		VectorMA( ent->r.currentOrigin, 12.0f, trace->plane.normal, ent->r.currentOrigin );
++		VectorCopy( ent->r.currentOrigin, ent->s.pos.trBase );
++		VectorScale( ent->s.pos.trDelta, 0.7f, ent->s.pos.trDelta );
++		if ( ent->s.pos.trDelta[2] < 170.0f ) {
++			ent->s.pos.trDelta[2] = 170.0f;
++		}
++		SnapVector( ent->s.pos.trDelta );
++		G_AddEvent( ent, EV_MISSILE_MISS, DirToByte( trace->plane.normal ) );
++		G_AddEvent( ent, EV_MISSILE_HIT, DirToByte( trace->plane.normal ) );
++		G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
++		return;
++	}
++
++	// check for bounce (non-rocket projectiles)
+ 	if ( !other->takedamage &&
+ 		( ent->s.eFlags & ( EF_BOUNCE | EF_BOUNCE_HALF ) ) ) {
+ 		G_BounceMissile( ent, trace );
+ 		G_AddEvent( ent, EV_GRENADE_BOUNCE, 0 );
+ 		return;
+ 	}
+@@ -663,11 +692,16 @@ gentity_t *fire_rocket (gentity_t *self, vec3_t start, vec3_t dir) {
+ 	bolt->splashMethodOfDeath = MOD_ROCKET_SPLASH;
+ 	bolt->clipmask = MASK_SHOT;
+ 	bolt->target_ent = NULL;
++	bolt->s.eFlags |= EF_BOUNCE;
++	bolt->count = 6;
++	bolt->damage = 0;
++	bolt->splashDamage = 0;
++	G_Printf( "[vibe-mod-debug] spawned rocket with bounce budget %d\n", bolt->count );
+ 
+ 	bolt->s.pos.trType = TR_LINEAR;
+ 	bolt->s.pos.trTime = level.time - MISSILE_PRESTEP_TIME;		// move a bit on the very first frame
+ 	VectorCopy( start, bolt->s.pos.trBase );
+-	VectorScale( dir, 900, bolt->s.pos.trDelta );
++	VectorScale( dir, 120, bolt->s.pos.trDelta );
+ 	SnapVector( bolt->s.pos.trDelta );			// save net bandwidth
+ 	VectorCopy (start, bolt->r.currentOrigin);
+
+diff --git a/code/game/g_local.h b/code/game/g_local.h
+--- a/code/game/g_local.h
++++ b/code/game/g_local.h
+@@ -30,7 +30,7 @@
+ //==================================================================
+ 
+ // the "gameversion" client command will print this plus compile date
+-#define	GAMEVERSION	BASEGAME
++#define	GAMEVERSION	"baseoa"
+ 
+ #define BODY_QUEUE_SIZE		8
+ 
+diff --git a/code/game/bg_public.h b/code/game/bg_public.h
+--- a/code/game/bg_public.h
++++ b/code/game/bg_public.h
+@@ -28,7 +28,7 @@
+-#define	GAME_VERSION		BASEGAME "-1"
++#define	GAME_VERSION		"baseoa-1"
+ 
+ #define	DEFAULT_GRAVITY		800
+ #define	GIB_HEALTH			-40
+ #define	ARMOR_PROTECTION	0.66
+ 
+ #define	MAX_ITEMS			256
+ 
+ 
