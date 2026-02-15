@@ -1,0 +1,405 @@
+diff --git a/code/game/bg_public.h b/code/game/bg_public.h
+index 7d203fb0..cb68447b 100644
+--- a/code/game/bg_public.h
++++ b/code/game/bg_public.h
+@@ -25,7 +25,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ // because games can change separately from the main system version, we need a
+ // second version that must match between game and cgame
+ 
+-#define	GAME_VERSION		BASEGAME "-1"
++#define	GAME_VERSION		"baseoa-1"
+ 
+ #define	DEFAULT_GRAVITY		800
+ #define	GIB_HEALTH			-40
+@@ -740,4 +740,3 @@ qboolean	BG_PlayerTouchesItem( playerState_t *ps, entityState_t *item, int atTim
+ #define KAMI_SHOCKWAVE_MAXRADIUS		1320
+ #define KAMI_BOOMSPHERE_MAXRADIUS		720
+ #define KAMI_SHOCKWAVE2_MAXRADIUS		704
+-
+diff --git a/code/game/g_active.c b/code/game/g_active.c
+index 8c9a7848..04b221ca 100644
+--- a/code/game/g_active.c
++++ b/code/game/g_active.c
+@@ -841,6 +841,9 @@ void ClientThink_real( gentity_t *ent ) {
+ 
+ 	// set speed
+ 	client->ps.speed = g_speed.value;
++	/* [vibe-afterlife] apply per-kill speed stacks, clamped by server cvar cap */
++	client->pers.vibeKillSpeedBonus = Com_Clamp( 0.0f, Com_Clamp( 0.0f, 3.0f, vibe_kill_speed_cap.value ), client->pers.vibeKillSpeedBonus );
++	client->ps.speed *= ( 1.0f + client->pers.vibeKillSpeedBonus );
+ 
+ #ifdef MISSIONPACK
+ 	if( bg_itemlist[client->ps.stats[STAT_PERSISTANT_POWERUP]].giTag == PW_SCOUT ) {
+@@ -1188,4 +1191,3 @@ void ClientEndFrame( gentity_t *ent ) {
+ //	ent->client->areabits[i >> 3] |= 1 << (i & 7);
+ }
+ 
+-
+diff --git a/code/game/g_combat.c b/code/game/g_combat.c
+index b8f7448a..55ccd0dd 100644
+--- a/code/game/g_combat.c
++++ b/code/game/g_combat.c
+@@ -312,6 +312,246 @@ char	*modNames[] = {
+ 	"MOD_GRAPPLE"
+ };
+ 
++#define VIBE_AFTERLIFE_GHOST_COUNT_LIMIT	8
++#define VIBE_AFTERLIFE_GHOST_MIN_TTL_MS		250
++#define VIBE_AFTERLIFE_GHOST_MAX_TTL_MS		60000
++#define VIBE_AFTERLIFE_GHOST_THINK_MS		100
++#define VIBE_AFTERLIFE_GHOST_SPEED			380.0f
++#define VIBE_AFTERLIFE_GHOST_TRIGGER_RADIUS	44.0f
++
++static int VibeAfterlifeClampInt( int value, int minValue, int maxValue ) {
++	if ( value < minValue ) {
++		return minValue;
++	}
++	if ( value > maxValue ) {
++		return maxValue;
++	}
++	return value;
++}
++
++static void VibeAfterlifeGhostDetonate( gentity_t *ghost ) {
++	gentity_t	*ghostOwner;
++	vec3_t		dir;
++
++	if ( ghost->damage <= 0 ) {
++		G_FreeEntity( ghost );
++		return;
++	}
++
++	if ( !ghost->enemy || !ghost->enemy->inuse || !ghost->enemy->client ||
++		ghost->enemy->client->pers.connected != CON_CONNECTED ||
++		ghost->enemy->health <= 0 ) {
++		G_FreeEntity( ghost );
++		return;
++	}
++
++	ghostOwner = ghost;
++	if ( ghost->parent && ghost->parent->inuse && ghost->parent->client ) {
++		ghostOwner = ghost->parent;
++	}
++
++	VectorSubtract( ghost->enemy->r.currentOrigin, ghost->r.currentOrigin, dir );
++	if ( VectorNormalize( dir ) == 0.0f ) {
++		VectorSet( dir, 0.0f, 0.0f, 1.0f );
++	}
++
++	G_Damage( ghost->enemy, ghost, ghostOwner, dir, ghost->enemy->r.currentOrigin,
++		ghost->damage, 0, MOD_TRIGGER_HURT );
++
++	G_FreeEntity( ghost );
++}
++
++static void VibeAfterlifeGhostDie( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int damage, int meansOfDeath ) {
++	(void)inflictor;
++	(void)attacker;
++	(void)damage;
++	(void)meansOfDeath;
++	G_FreeEntity( self );
++}
++
++static void VibeAfterlifeGhostThink( gentity_t *ghost ) {
++	gentity_t	*target;
++	vec3_t		targetPoint;
++	vec3_t		toTarget;
++	vec3_t		nextOrigin;
++	float		distance;
++
++	if ( level.time >= ghost->timestamp ) {
++		G_FreeEntity( ghost );
++		return;
++	}
++
++	target = ghost->enemy;
++	if ( !target || !target->inuse || !target->client ||
++		target->client->pers.connected != CON_CONNECTED ) {
++		G_FreeEntity( ghost );
++		return;
++	}
++
++	if ( target->health <= 0 ) {
++		G_FreeEntity( ghost );
++		return;
++	}
++
++	VectorCopy( target->r.currentOrigin, targetPoint );
++	targetPoint[2] += 24.0f;
++	VectorSubtract( targetPoint, ghost->r.currentOrigin, toTarget );
++	distance = VectorLength( toTarget );
++	if ( distance <= VIBE_AFTERLIFE_GHOST_TRIGGER_RADIUS ) {
++		VibeAfterlifeGhostDetonate( ghost );
++		return;
++	}
++
++	/* [vibe-afterlife] lightweight chase: direct movement to target every FRAMETIME */
++	if ( distance > 0.0f ) {
++		VectorScale( toTarget, 1.0f / distance, toTarget );
++	} else {
++		VectorClear( toTarget );
++	}
++	VectorMA( ghost->r.currentOrigin, VIBE_AFTERLIFE_GHOST_SPEED * ( VIBE_AFTERLIFE_GHOST_THINK_MS / 1000.0f ), toTarget, nextOrigin );
++
++	G_SetOrigin( ghost, nextOrigin );
++	trap_LinkEntity( ghost );
++
++	VectorSubtract( targetPoint, ghost->r.currentOrigin, toTarget );
++	if ( VectorLength( toTarget ) <= VIBE_AFTERLIFE_GHOST_TRIGGER_RADIUS ) {
++		VibeAfterlifeGhostDetonate( ghost );
++		return;
++	}
++
++	ghost->nextthink = level.time + VIBE_AFTERLIFE_GHOST_THINK_MS;
++}
++
++static qboolean VibeAfterlifeSpawnGhost( gentity_t *victim, gentity_t *killer, int ttlMs, int ghostDamage ) {
++	gentity_t	*ghost;
++	vec3_t		spawnOrigin;
++
++	if ( !victim || !killer || !killer->client ) {
++		return qfalse;
++	}
++
++	if ( !G_EntitiesFree() ) {
++		return qfalse;
++	}
++
++	ghost = G_Spawn();
++	ghost->classname = "vibe_afterlife_ghost";
++	ghost->parent = victim;
++	ghost->enemy = killer;
++	ghost->think = VibeAfterlifeGhostThink;
++	ghost->nextthink = level.time + VIBE_AFTERLIFE_GHOST_THINK_MS;
++	ghost->timestamp = level.time + ttlMs;
++	ghost->health = 20;
++	ghost->takedamage = qtrue;
++	ghost->die = VibeAfterlifeGhostDie;
++	ghost->damage = ghostDamage;
++
++	ghost->s.eType = ET_GENERAL;
++	ghost->s.modelindex = G_ModelIndex( "models/powerups/health/medium_cross.md3" );
++	ghost->s.pos.trType = TR_INTERPOLATE;
++
++	VectorSet( ghost->r.mins, -8.0f, -8.0f, -8.0f );
++	VectorSet( ghost->r.maxs, 8.0f, 8.0f, 8.0f );
++	ghost->clipmask = MASK_PLAYERSOLID;
++	ghost->r.contents = CONTENTS_BODY;
++
++	VectorCopy( victim->r.currentOrigin, spawnOrigin );
++	spawnOrigin[0] += crandom() * 36.0f;
++	spawnOrigin[1] += crandom() * 36.0f;
++	spawnOrigin[2] += 20.0f + random() * 20.0f;
++	G_SetOrigin( ghost, spawnOrigin );
++	trap_LinkEntity( ghost );
++
++	return qtrue;
++}
++
++static int VibeAfterlifeSpawnGhosts( gentity_t *victim, gentity_t *killer ) {
++	int ghostMin;
++	int ghostMax;
++	int ttlMs;
++	int ghostDamage;
++	int ghostsToSpawn;
++	int ghostsSpawned;
++	int i;
++
++	ghostMin = VibeAfterlifeClampInt( vibe_ghost_min.integer, 0, VIBE_AFTERLIFE_GHOST_COUNT_LIMIT );
++	ghostMax = VibeAfterlifeClampInt( vibe_ghost_max.integer, 0, VIBE_AFTERLIFE_GHOST_COUNT_LIMIT );
++	if ( ghostMax < ghostMin ) {
++		ghostMax = ghostMin;
++	}
++	if ( ghostMax <= 0 ) {
++		return 0;
++	}
++
++	ghostsToSpawn = ghostMin;
++	if ( ghostMax > ghostMin ) {
++		ghostsToSpawn += rand() % ( ghostMax - ghostMin + 1 );
++	}
++
++	ttlMs = VibeAfterlifeClampInt( vibe_ghost_ttl_ms.integer, VIBE_AFTERLIFE_GHOST_MIN_TTL_MS, VIBE_AFTERLIFE_GHOST_MAX_TTL_MS );
++	ghostDamage = VibeAfterlifeClampInt( vibe_ghost_damage.integer, 0, 200 );
++
++	ghostsSpawned = 0;
++	for ( i = 0; i < ghostsToSpawn; i++ ) {
++		if ( VibeAfterlifeSpawnGhost( victim, killer, ttlMs, ghostDamage ) ) {
++			ghostsSpawned++;
++		}
++	}
++
++	return ghostsSpawned;
++}
++
++static void VibeAfterlifeApplyKillRewards( gentity_t *killer ) {
++	float speedStep;
++	float speedCap;
++	int leechHp;
++	int leechCap;
++	int maxHealth;
++	int healCap;
++	int speedPercent;
++	int speedCapPercent;
++
++	if ( !killer || !killer->client ) {
++		return;
++	}
++
++	/* [vibe-afterlife] clamp tunables at read-time so bad cvar values stay safe */
++	speedStep = Com_Clamp( 0.0f, 1.0f, vibe_kill_speed_bonus.value );
++	speedCap = Com_Clamp( 0.0f, 3.0f, vibe_kill_speed_cap.value );
++	killer->client->pers.vibeKillSpeedBonus = Com_Clamp( 0.0f, speedCap, killer->client->pers.vibeKillSpeedBonus + speedStep );
++
++	leechHp = VibeAfterlifeClampInt( vibe_kill_leech_hp.integer, 0, 200 );
++	leechCap = VibeAfterlifeClampInt( vibe_kill_leech_cap.integer, 0, 200 );
++
++	maxHealth = killer->client->ps.stats[STAT_MAX_HEALTH];
++	if ( maxHealth <= 0 ) {
++		maxHealth = killer->client->pers.maxHealth;
++	}
++	if ( maxHealth <= 0 ) {
++		maxHealth = 100;
++	}
++	healCap = maxHealth + leechCap;
++
++	if ( leechHp > 0 ) {
++		killer->health += leechHp;
++		if ( killer->health > healCap ) {
++			killer->health = healCap;
++		}
++	}
++	if ( killer->health < 1 ) {
++		killer->health = 1;
++	}
++	killer->client->ps.stats[STAT_HEALTH] = killer->health;
++
++	speedPercent = (int)( killer->client->pers.vibeKillSpeedBonus * 100.0f + 0.5f );
++	speedCapPercent = (int)( speedCap * 100.0f + 0.5f );
++	G_Printf( "[vibe-afterlife] kill reward: %s speedBonus=%d%% (cap=%d%%), health=%d\n",
++		killer->client->pers.netname, speedPercent, speedCapPercent, killer->health );
++	trap_SendServerCommand( killer - g_entities, va(
++		"print \"^5[vibe-afterlife]^7 Kill reward: speed %+d%%/%d%%, HP %d\\n\"",
++		speedPercent, speedCapPercent, killer->health ) );
++}
++
+ #ifdef MISSIONPACK
+ /*
+ ==================
+@@ -437,6 +677,7 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
+ 	int			contents;
+ 	int			killer;
+ 	int			i;
++	int			ghostsSpawned;
+ 	char		*killerName, *obit;
+ 
+ 	if ( self->client->ps.pm_type == PM_DEAD ) {
+@@ -501,6 +742,16 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
+ 	self->enemy = attacker;
+ 
+ 	self->client->ps.persistant[PERS_KILLED]++;
++	ghostsSpawned = 0;
++	if ( attacker && attacker->client && attacker != self ) {
++		ghostsSpawned = VibeAfterlifeSpawnGhosts( self, attacker );
++		/* [vibe-afterlife] debug-visible death log with spawned ghost count + target */
++		G_Printf( "[vibe-afterlife] death: %s spawned %d ghost(s) targeting %s\n",
++			self->client->pers.netname, ghostsSpawned, attacker->client->pers.netname );
++		trap_SendServerCommand( -1, va(
++			"print \"^5[vibe-afterlife]^7 %s spawned %d ghost(s) targeting %s\\n\"",
++			self->client->pers.netname, ghostsSpawned, attacker->client->pers.netname ) );
++	}
+ 
+ 	if (attacker && attacker->client) {
+ 		attacker->client->lastkilled_client = self->s.number;
+@@ -534,11 +785,12 @@ void player_die( gentity_t *self, gentity_t *inflictor, gentity_t *attacker, int
+ 				attacker->client->ps.eFlags &= ~(EF_AWARD_IMPRESSIVE | EF_AWARD_EXCELLENT | EF_AWARD_GAUNTLET | EF_AWARD_ASSIST | EF_AWARD_DEFEND | EF_AWARD_CAP );
+ 				attacker->client->ps.eFlags |= EF_AWARD_EXCELLENT;
+ 				attacker->client->rewardTime = level.time + REWARD_SPRITE_TIME;
+-			}
+-			attacker->client->lastKillTime = level.time;
++				}
++				attacker->client->lastKillTime = level.time;
++				VibeAfterlifeApplyKillRewards( attacker );
+ 
+-		}
+-	} else {
++			}
++		} else {
+ 		AddScore( self, self->r.currentOrigin, -1 );
+ 	}
+ 
+diff --git a/code/game/g_local.h b/code/game/g_local.h
+index 10ec8dbf..04d84a8c 100644
+--- a/code/game/g_local.h
++++ b/code/game/g_local.h
+@@ -29,7 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ //==================================================================
+ 
+ // the "gameversion" client command will print this plus compile date
+-#define	GAMEVERSION	BASEGAME
++#define	GAMEVERSION	"baseoa"
+ 
+ #define BODY_QUEUE_SIZE		8
+ 
+@@ -246,6 +246,7 @@ typedef struct {
+ 	int			voteCount;			// to prevent people from constantly calling votes
+ 	int			teamVoteCount;		// to prevent people from constantly calling votes
+ 	qboolean	teamInfo;			// send team overlay updates?
++	float		vibeKillSpeedBonus;	// [vibe-afterlife] persistent stacking speed reward
+ } clientPersistant_t;
+ 
+ 
+@@ -710,6 +711,14 @@ extern	vmCvar_t	g_password;
+ extern	vmCvar_t	g_needpass;
+ extern	vmCvar_t	g_gravity;
+ extern	vmCvar_t	g_speed;
++extern	vmCvar_t	vibe_ghost_min;
++extern	vmCvar_t	vibe_ghost_max;
++extern	vmCvar_t	vibe_ghost_ttl_ms;
++extern	vmCvar_t	vibe_ghost_damage;
++extern	vmCvar_t	vibe_kill_speed_bonus;
++extern	vmCvar_t	vibe_kill_speed_cap;
++extern	vmCvar_t	vibe_kill_leech_hp;
++extern	vmCvar_t	vibe_kill_leech_cap;
+ extern	vmCvar_t	g_knockback;
+ extern	vmCvar_t	g_quadfactor;
+ extern	vmCvar_t	g_forcerespawn;
+@@ -950,4 +959,3 @@ void	trap_BotResetWeaponState(int weaponstate);
+ int		trap_GeneticParentsAndChildSelection(int numranks, float *ranks, int *parent1, int *parent2, int *child);
+ 
+ void	trap_SnapVector( float *v );
+-
+diff --git a/code/game/g_main.c b/code/game/g_main.c
+index ed5d4ead..d9591455 100644
+--- a/code/game/g_main.c
++++ b/code/game/g_main.c
+@@ -51,6 +51,14 @@ vmCvar_t	g_maxGameClients;
+ vmCvar_t	g_dedicated;
+ vmCvar_t	g_speed;
+ vmCvar_t	g_gravity;
++vmCvar_t	vibe_ghost_min;
++vmCvar_t	vibe_ghost_max;
++vmCvar_t	vibe_ghost_ttl_ms;
++vmCvar_t	vibe_ghost_damage;
++vmCvar_t	vibe_kill_speed_bonus;
++vmCvar_t	vibe_kill_speed_cap;
++vmCvar_t	vibe_kill_leech_hp;
++vmCvar_t	vibe_kill_leech_cap;
+ vmCvar_t	g_cheats;
+ vmCvar_t	g_knockback;
+ vmCvar_t	g_quadfactor;
+@@ -140,6 +148,14 @@ static cvarTable_t		gameCvarTable[] = {
+ 
+ 	{ &g_speed, "g_speed", "320", 0, 0, qtrue  },
+ 	{ &g_gravity, "g_gravity", "800", 0, 0, qtrue  },
++	{ &vibe_ghost_min, "vibe_ghost_min", "1", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_ghost_max, "vibe_ghost_max", "3", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_ghost_ttl_ms, "vibe_ghost_ttl_ms", "10000", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_ghost_damage, "vibe_ghost_damage", "10", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_kill_speed_bonus, "vibe_kill_speed_bonus", "0.03", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_kill_speed_cap, "vibe_kill_speed_cap", "0.30", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_kill_leech_hp, "vibe_kill_leech_hp", "5", CVAR_ARCHIVE, 0, qfalse  },
++	{ &vibe_kill_leech_cap, "vibe_kill_leech_cap", "25", CVAR_ARCHIVE, 0, qfalse  },
+ 	{ &g_knockback, "g_knockback", "1000", 0, 0, qtrue  },
+ 	{ &g_quadfactor, "g_quadfactor", "3", 0, 0, qtrue  },
+ 	{ &g_weaponRespawn, "g_weaponrespawn", "5", 0, 0, qtrue  },

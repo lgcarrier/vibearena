@@ -100,7 +100,7 @@ Generate a starter mod that changes rocket behavior:
 This creates a mod named `bounce_twice_rockets` with:
 
 - rocket launcher projectiles bouncing twice before exploding
-- generated patch source at `mods/bounce_twice_rockets/patches/rocket_bounce_twice.patch`
+- generated patch source at `mods/bounce_twice_rockets/patches/qagame.patch`
 - built VM at `mods/bounce_twice_rockets/build/vm/qagame.qvm`
 - packaged mod at `VibeArena_Build/bounce_twice_rockets/z_bounce_twice_rockets.pk3`
 - ready launcher `VibeArena_Build/run_bounce_twice_rockets.sh`
@@ -108,7 +108,7 @@ This creates a mod named `bounce_twice_rockets` with:
 Run the default mod (exact flow, from repo root):
 
 ```bash
-cd /Users/lgcarrier/Documents/coding-sandbox/hallucination-arena
+cd /Users/lgcarrier/Documents/coding-sandbox/vibearena
 ./scripts/build.sh
 ./scripts/generate_default_mod.sh
 ./VibeArena_Build/run_bounce_twice_rockets.sh
@@ -154,6 +154,13 @@ Custom mod name:
 ./VibeArena_Build/run_my_vibe_mod.sh
 ```
 
+Mod scaffold and asset overrides:
+
+- Starter scaffold creates `mods/<mod_name>/scripts`, `maps`, `textures`, `sound`, `vm`, and `assets/mainmenu`.
+- When packaging, the generator also includes these optional asset roots if present: `scripts`, `maps`, `textures`, `sound`, `models`, `music`, `gfx`, `ui`, `fonts`, `sprites`, `env`, `video`.
+- Player skin/model overrides belong under `mods/<mod_name>/models/players/...` (for example `head_<skin>.skin`, `upper_<skin>.skin`, `lower_<skin>.skin`, plus referenced `.tga/.jpg` textures).
+- In-game soundtrack overrides belong under `mods/<mod_name>/music/*.ogg`. Filenames must exactly match what maps request (for bundled OA maps this includes names like `OA02.ogg`, `OA03.ogg`, `OA06.ogg`, `OA07.ogg`, `OA08.ogg`, `OA09.ogg`, `OA10.ogg`, `OA11.ogg`, `OA13.ogg`, `OA14.ogg`, `fla22k_02.ogg`, `fla22k_04_intro.ogg`, `fla22k_04_loop.ogg`, `sonic2.ogg`, `sonic3.ogg`, `sonic6.ogg`).
+
 Custom main menu background (per mod):
 
 1. Put an image at `mods/<mod_name>/assets/mainmenu/background.jpg` (or `.jpeg`, `.png`, `.tga`).
@@ -197,6 +204,59 @@ strings mods/bounce_twice_rockets/build/vm/qagame.qvm | grep -E "baseoa-1|baseq3
 ```
 
 Expected result: `baseoa-1` is present and `baseq3-1` is absent.
+
+## Reusable Mod Test Flows
+
+Use these for any generated mod by replacing `<mod_name>`.
+
+1. Interactive/manual test (visual gameplay):
+
+```bash
+./VibeArena_Build/run_<mod_name>.sh +devmap oa_dm1
+```
+
+Manual checks:
+- kill an enemy and confirm debug print, HP leech, and speed stacking/cap
+- die to an enemy and confirm ghost spawn/chase/TTL despawn behavior
+
+2. Headless smoke test (server + qvm load):
+
+```bash
+./VibeArena_Build/ioq3ded \
+  +set net_enabled 0 \
+  +set fs_basepath "$(pwd)/VibeArena_Build" \
+  +set fs_homepath "$(pwd)/VibeArena_Build" \
+  +set com_basegame baseoa \
+  +set fs_game <mod_name> \
+  +set vm_game 2 \
+  +set dedicated 1 \
+  +devmap oa_dm1 \
+  +quit
+```
+
+Check output for:
+- `gamename: baseoa`
+- `Loading vm file vm/qagame.qvm...`
+- no `baseq3-1` mismatch messages
+
+3. Automated gameplay exercise (bots + debug logs):
+
+```bash
+./VibeArena_Build/ioq3ded \
+  +set net_enabled 0 \
+  +set fs_basepath "$(pwd)/VibeArena_Build" \
+  +set fs_homepath "$(pwd)/VibeArena_Build" \
+  +set com_basegame baseoa \
+  +set fs_game <mod_name> \
+  +set vm_game 2 \
+  +set dedicated 1 \
+  +set g_gametype 0 \
+  +devmap oa_dm1 \
+  +addbot sarge 5 \
+  +addbot major 5
+```
+
+Let bots fight and verify expected debug lines for your mod logic in console/log output.
 
 ## Running the Game
 

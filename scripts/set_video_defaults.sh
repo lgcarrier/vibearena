@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/VibeArena_Build"
 
 R_MODE="-2"
-R_FULLSCREEN="1"
+R_FULLSCREEN="0"
 R_NOBORDER="0"
 R_CUSTOMWIDTH=""
 R_CUSTOMHEIGHT=""

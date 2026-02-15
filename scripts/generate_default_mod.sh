@@ -56,7 +56,7 @@ LOCAL_CMAKE_BIN="${LOCAL_CMAKE_DIR}/CMake.app/Contents/bin/cmake"
 
 MOD_DIR="${ROOT_DIR}/mods/${MOD_NAME}"
 PATCH_DIR="${MOD_DIR}/patches"
-PATCH_FILE="${PATCH_DIR}/rocket_bounce_twice.patch"
+PATCH_FILE="${PATCH_DIR}/qagame.patch"
 MOD_BUILD_DIR="${MOD_DIR}/build"
 MOD_VM_DIR="${MOD_BUILD_DIR}/vm"
 MOD_DIST_DIR="${DIST_DIR}/${MOD_NAME}"
@@ -140,6 +140,10 @@ cleanup() {
 
 write_patch_file() {
   mkdir -p "$PATCH_DIR"
+  if [ -s "$PATCH_FILE" ] && [ "$MOD_NAME" != "$DEFAULT_MOD_NAME" ]; then
+    echo "Using existing patch file: ${PATCH_FILE}"
+    return
+  fi
   if [ "$MOD_VARIANT" = "debug-visible" ]; then
     cat > "$PATCH_FILE" <<'PATCH'
 diff --git a/code/game/g_missile.c b/code/game/g_missile.c
@@ -309,6 +313,10 @@ PATCH
 
 write_mod_readme() {
   mkdir -p "$MOD_DIR"
+  if [ -f "${MOD_DIR}/README.md" ] && [ "$MOD_NAME" != "$DEFAULT_MOD_NAME" ]; then
+    echo "Using existing README: ${MOD_DIR}/README.md"
+    return
+  fi
   if [ "$MOD_VARIANT" = "debug-visible" ]; then
     cat > "${MOD_DIR}/README.md" <<EOF
 # ${MOD_NAME}
