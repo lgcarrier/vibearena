@@ -67,10 +67,12 @@ After a successful build, you get:
 
 - Xcode Command Line Tools (`xcode-select --install`)
 - `bash`
+- `python3` (for `scripts/upscale_textures.py`)
 - `git`
 - `curl`
 - `unzip`
 - `zip`
+- `sips` (built into macOS; used for `.tga` conversion in upscaling workflow)
 - CMake `>= 3.25`
 
 If `cmake` is missing or too old, `scripts/build.sh` automatically bootstraps a local CMake under `.tools/`.
@@ -160,6 +162,52 @@ Mod scaffold and asset overrides:
 - When packaging, the generator also includes these optional asset roots if present: `scripts`, `maps`, `textures`, `sound`, `models`, `music`, `gfx`, `ui`, `fonts`, `sprites`, `env`, `video`.
 - Player skin/model overrides belong under `mods/<mod_name>/models/players/...` (for example `head_<skin>.skin`, `upper_<skin>.skin`, `lower_<skin>.skin`, plus referenced `.tga/.jpg` textures).
 - In-game soundtrack overrides belong under `mods/<mod_name>/music/*.ogg`. Filenames must exactly match what maps request (for bundled OA maps this includes names like `OA02.ogg`, `OA03.ogg`, `OA06.ogg`, `OA07.ogg`, `OA08.ogg`, `OA09.ogg`, `OA10.ogg`, `OA11.ogg`, `OA13.ogg`, `OA14.ogg`, `fla22k_02.ogg`, `fla22k_04_intro.ogg`, `fla22k_04_loop.ogg`, `sonic2.ogg`, `sonic3.ogg`, `sonic6.ogg`).
+
+## AI Skin Upscaling (Real-ESRGAN)
+
+Use `scripts/upscale_textures.py` to upscale player skin textures for any mod profile:
+
+```bash
+python3 scripts/upscale_textures.py --mod afterlife_arena
+```
+
+Interactive review mode (side-by-side original vs candidate, with accept/reject/rerun controls):
+
+```bash
+python3 scripts/upscale_textures.py --mod afterlife_arena --review
+```
+
+Default behavior:
+
+- Installs `realesrgan-ncnn-vulkan` automatically into `.tools/` (plus model files in `.tools/realesrgan-models`).
+- Resolves source assets in this order:
+  1. `--source-pk3`
+  2. `VibeArena_Build/<mod>/z_<mod>.pk3`
+  3. first `z_*.pk3` in `VibeArena_Build/<mod>/`
+  4. `--source-dir`
+  5. `mods/<mod>/`
+- Processes only images under `models/players/` (`.tga`, `.png`, `.jpg`, `.jpeg`).
+- Preserves `.tga` compatibility by converting intermediate outputs back to `.tga`.
+- Writes load-last output to `VibeArena_Build/<mod>/z_<mod>_upscaled_skins.pk3` unless `--output-pk3` is provided.
+
+Useful options:
+
+```bash
+python3 scripts/upscale_textures.py --mod <mod_name> --max-dimension 1024
+python3 scripts/upscale_textures.py --mod <mod_name> --source-dir mods/<mod_name>
+python3 scripts/upscale_textures.py --mod <mod_name> --output-pk3 /tmp/z_<mod_name>_upscaled.pk3
+python3 scripts/upscale_textures.py --mod <mod_name> --review --review-port 8765 --no-open-browser
+python3 scripts/upscale_textures.py --mod <mod_name> --review --rerun-preset anime:realesrgan-x4plus-anime:4
+```
+
+Quick verification:
+
+```bash
+unzip -l VibeArena_Build/<mod_name>/z_<mod_name>_upscaled_skins.pk3 | rg '^.+models/players/.+\.(tga|png|jpg|jpeg)$'
+```
+
+If you see `MoltenVK requires Metal, which is not available`, run from an interactive macOS desktop terminal session (not a restricted/headless environment).
+If the review server cannot bind a port, choose a different `--review-port` or run from a non-restricted terminal session.
 
 Custom main menu background (per mod):
 
@@ -432,6 +480,7 @@ The script recreates `VibeArena_Build/` and refreshes assets/build outputs.
 - `scripts/build.sh` - full build/package/verify workflow
 - `scripts/generate_default_mod.sh` - generates a starter gameplay mod and packages it as a `.pk3`
 - `scripts/set_video_defaults.sh` - synchronizes video defaults across local profiles
+- `scripts/upscale_textures.py` - upscales `models/players` textures for a selected mod and writes a load-last override `.pk3`
 - `README.md` - project docs
 - `LICENSE` - GPLv2 license text
 - `.gitignore` - excludes generated binaries, downloads, logs, and tool cache
